@@ -12,10 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
@@ -25,8 +25,9 @@ jobs:
       - name: Create env file
         run: echo "THREADS_TOKEN=${{ secrets.THREADS_TOKEN }}" > .env
 
-      - name: Create CSV file
-        run: echo "${{ secrets.PRODUCTS_CSV }}" > products_aff.csv
+      - name: Decode CSV file
+        run: |
+          echo "${{ secrets.PRODUCTS_CSV_B64 }}" | base64 --decode > products_aff.csv
 
       - name: Run tool
         run: python main.py
