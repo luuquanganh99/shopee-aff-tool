@@ -1,0 +1,60 @@
+name: Auto Refresh Token
+
+on:
+  schedule:
+    - cron: '0 0 1 * *'  # Chạy ngày 1 mỗi tháng
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Refresh token
+        env:
+          THREADS_TOKEN: ${{ secrets.THREADS_TOKEN }}
+          APP_SECRET: ${{ secrets.APP_SECRET }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          REPO: ${{ github.repository }}
+        run: |
+          python - <<'EOF'
+          import requests, os
+
+          token = os.environ["THREADS_TOKEN"]
+          app_secret = os.environ["APP_SECRET"]
+          gh_token = os.environ["GH_TOKEN"]
+          repo = os.environ["REPO"]
+
+          # Refresh token
+          r = requests.get(
+              "https://graph.threads.net/refresh_access_token",
+              params={"grant_type": "th_refresh_token", "access_token": token}
+          )
+          data = r.json()
+          new_token = data.get("access_token")
+
+          if new_token:
+              print(f"✅ Refresh thành công!")
+              # Cập nhật GitHub Secret tự động
+              import subprocess
+              result = subprocess.run([
+                  "curl", "-s", "-X", "PUT",
+                  f"https://api.github.com/repos/{repo}/actions/secrets/THREADS_TOKEN",
+                  "-H", f"Authorization: token {gh_token}",
+                  "-H", "Content-Type: application/json",
+                  "-d", f'{{"encrypted_value": "{new_token}"}}'
+              ], capture_output=True, text=True)
+              print(f"Update secret: {result.stdout}")
+          else:
+              print(f"❌ Lỗi: {data}")
+          EOF
