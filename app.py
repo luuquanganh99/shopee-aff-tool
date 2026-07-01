@@ -165,4 +165,116 @@ elif st.session_state.page == "dashboard":
         st.link_button("🚀 Kết nối Threads ngay", oauth_url, use_container_width=True)
 
     st.divider()
+
+    # ─── Upload CSV sản phẩm ─────────────────────────────
+    st.subheader("📦 Sản phẩm Shopee Affiliate")
+
+    existing_products = supabase.table("products").select("*").eq("user_id", user["id"]).execute()
+    product_count = len(existing_products.data)
+
+    if product_count > 0:
+        st.success(f"✅ Đã có {product_count} sản phẩm trong hệ thống.")
+        if st.button("🗑️ Xóa và upload lại"):
+            supabase.table("products").delete().eq("user_id", user["id"]).execute()
+            st.rerun()
+    else:
+        with st.expander("📋 Hướng dẫn lấy file CSV — Bấm để xem", expanded=True):
+            st.markdown("""
+### Bước 1 — Vào Shopee Affiliate
+👉 Truy cập: https://affiliate.shopee.vn
+
+---
+
+### Bước 2 — Vào mục Sản phẩm
+- Nhấn **"Sản phẩm"** trên menu trên cùng
+- Chọn **"Danh sách sản phẩm"**
+
+---
+
+### Bước 3 — Lọc sản phẩm hoa hồng cao
+- Sắp xếp theo **"Hoa hồng"** từ cao đến thấp
+- Chọn những sản phẩm muốn đăng
+
+---
+
+### Bước 4 — Xuất file CSV
+- Nhấn nút **"Xuất"** hoặc **"Export"**
+- Tải file CSV về máy
+
+---
+
+### Bước 5 — Upload file CSV bên dưới ⬇️
+""")
+
+        uploaded_file = st.file_uploader("Chọn file CSV sản phẩm Shopee Affiliate", type=["csv"])
+
+        if uploaded_file:
+            import pandas as pd
+            import io
+            df = pd.read_csv(io.StringIO(uploaded_file.getvalue().decode("utf-8")))
+            st.dataframe(df.head(5))
+
+            # Tự động detect cột
+            col_map = {}
+            for col in df.columns:
+                col_lower = col.lower()
+                if "tên" in col_lower or "name" in col_lower or "product" in col_lower:
+                    col_map["name"] = col
+                if "link" in col_lower or "url" in col_lower or "affiliate" in col_lower:
+                    col_map["link"] = col
+                if "hoa hồng" in col_lower or "commission" in col_lower or "%" in col_lower:
+                    col_map["commission"] = col
+                if "giá" in col_lower or "price" in col_lower:
+                    col_map["price"] = col
+                if "ảnh" in col_lower or "image" in col_lower or "hình" in col_lower:
+                    col_map["image"] = col
+
+            if st.button("✅ Lưu sản phẩm vào hệ thống", use_container_width=True):
+                products_to_insert = []
+                for _, row in df.iterrows():
+                    products_to_insert.append({
+                        "user_id": user["id"],
+                        "product_name": str(row.get(col_map.get("name", df.columns[0]), "")),
+                        "affiliate_link": str(row.get(col_map.get("link", ""), "")),
+                        "commission_rate": float(str(row.get(col_map.get("commission", ""), 0)).replace("%","").replace(",",".") or 0),
+                        "price": float(str(row.get(col_map.get("price", ""), 0)).replace(",","").replace(".","") or 0),
+                        "image_url": str(row.get(col_map.get("image", ""), "")),
+                    })
+                supabase.table("products").insert(products_to_insert).execute()
+                st.success(f"🎉 Đã lưu {len(products_to_insert)} sản phẩm!")
+                st.rerun()
+
+    st.divider()
+
+    # ─── Chọn khung giờ đăng ─────────────────────────────
+    st.subheader("⏰ Khung giờ đăng bài")
+
+    if threads_connected:
+        existing_schedules = supabase.table("schedules").select("*").eq("user_id", user["id"]).eq("platform", "threads").execute()
+        saved_hours = [s["hour"] for s in existing_schedules.data]
+
+        st.markdown("Chọn các giờ bạn muốn đăng bài mỗi ngày (giờ Việt Nam):")
+
+        all_hours = list(range(6, 23))
+        selected_hours = st.multiselect(
+            "Chọn khung giờ:",
+            options=all_hours,
+            default=saved_hours if saved_hours else [7, 12, 20],
+            format_func=lambda h: f"{h}:00"
+        )
+
+        if st.button("💾 Lưu khung giờ", use_container_width=True):
+            supabase.table("schedules").delete().eq("user_id", user["id"]).eq("platform", "threads").execute()
+            for h in selected_hours:
+                supabase.table("schedules").insert({
+                    "user_id": user["id"],
+                    "platform": "threads",
+                    "hour": h,
+                    "is_active": True
+                }).execute()
+            st.success(f"✅ Đã lưu {len(selected_hours)} khung giờ đăng!")
+    else:
+        st.warning("⚠️ Kết nối Threads trước để chọn khung giờ đăng.")
+
+    st.divider()
     st.info("🚧 Kết nối Instagram và Facebook sẽ có trong bản cập nhật tiếp theo!")
