@@ -1,17 +1,46 @@
 import streamlit as st
 import os
+import requests
 from auth import register_user, login_user, get_all_users_for_admin, approve_user, reject_user
 from supabase_client import supabase
 
 st.set_page_config(page_title="AffBot", page_icon="🤖", layout="centered")
 
-# ─── Session State ───────────────────────────────────────
+# ─── Threads OAuth Config ─────────────────────────────────
+THREADS_APP_ID = os.getenv("THREADS_APP_ID")
+THREADS_APP_SECRET = os.getenv("THREADS_APP_SECRET")
+THREADS_REDIRECT_URI = os.getenv("THREADS_REDIRECT_URI")
+
+def get_threads_oauth_url(user_id):
+    return (
+        f"https://threads.net/oauth/authorize"
+        f"?client_id={THREADS_APP_ID}"
+        f"&redirect_uri={THREADS_REDIRECT_URI}"
+        f"&scope=threads_basic,threads_content_publish"
+        f"&response_type=code"
+        f"&state=threads|{user_id}"
+    )
+
+def exchange_code_for_token(code):
+    response = requests.post(
+        "https://graph.threads.net/oauth/access_token",
+        data={
+            "client_id": THREADS_APP_ID,
+            "client_secret": THREADS_APP_SECRET,
+            "redirect_uri": THREADS_REDIRECT_URI,
+            "code": code,
+            "grant_type": "authorization_code",
+        }
+    )
+    data = response.json()
+    return data.get("access_token")
+
+# ─── Session State ────────────────────────────────────────
 if "user" not in st.session_state:
     st.session_state.user = None
 if "page" not in st.session_state:
     st.session_state.page = "login"
 
-# ─── Hàm logout ──────────────────────────────────────────
 def logout():
     st.session_state.user = None
     st.session_state.page = "login"
@@ -85,69 +114,31 @@ elif st.session_state.page == "admin":
                 st.rerun()
 
 # ═══════════════════════════════════════════════════════════
-# OAUTH THREADS CALLBACK
-# ═══════════════════════════════════════════════════════════
-import requests
-
-THREADS_APP_ID = os.getenv("THREADS_APP_ID")
-THREADS_APP_SECRET = os.getenv("THREADS_APP_SECRET")
-THREADS_REDIRECT_URI = os.getenv("THREADS_REDIRECT_URI")
-
-def get_threads_oauth_url():
-    return (
-        f"https://threads.net/oauth/authorize"
-        f"?client_id={THREADS_APP_ID}"
-        f"&redirect_uri={THREADS_REDIRECT_URI}"
-        f"&scope=threads_basic,threads_content_publish"
-        f"&response_type=code"
-    )
-
-def exchange_code_for_token(code: str):
-    response = requests.post(
-        "https://graph.threads.net/oauth/access_token",
-        data={
-            "client_id": THREADS_APP_ID,
-            "client_secret": THREADS_APP_SECRET,
-            "redirect_uri": THREADS_REDIRECT_URI,
-            "code": code,
-            "grant_type": "authorization_code",
-        }
-    )
-    data = response.json()
-    return data.get("access_token")
-
-# ═══════════════════════════════════════════════════════════
 # TRANG DASHBOARD USER
 # ═══════════════════════════════════════════════════════════
 elif st.session_state.page == "dashboard":
     user = st.session_state.user
 
-    # Xử lý OAuth callback — khi Meta redirect về với ?code=...
+    # Xử lý OAuth callback
     query_params = st.query_params
-    if "code" in query_params and "platform" in query_params:
+    if "code" in query_params:
         code = query_params["code"]
-        platform = query_params["platform"]
-        
-        if platform == "threads":
-            with st.spinner("Đang kết nối Threads..."):
-                token = exchange_code_for_token(code)
-                if token:
-                    # Xóa token cũ nếu có
-                    supabase.table("platforms").delete().eq("user_id", user["id"]).eq("platform", "threads").execute()
-                    # Lưu token mới
-                    supabase.table("platforms").insert({
-                        "user_id": user["id"],
-                        "platform": "threads",
-                        "access_token": token,
-                        "is_active": True
-                    }).execute()
-                    st.success("🎉 Kết nối Threads thành công!")
-                    # Xóa query params
-                    st.query_params.clear()
-                    st.rerun()
-                else:
-                    st.error("❌ Kết nối thất bại. Thử lại nhé!")
-                    st.query_params.clear()
+        with st.spinner("Đang kết nối Threads..."):
+            token = exchange_code_for_token(code)
+            if token:
+                supabase.table("platforms").delete().eq("user_id", user["id"]).eq("platform", "threads").execute()
+                supabase.table("platforms").insert({
+                    "user_id": user["id"],
+                    "platform": "threads",
+                    "access_token": token,
+                    "is_active": True
+                }).execute()
+                st.query_params.clear()
+                st.success("🎉 Kết nối Threads thành công!")
+                st.rerun()
+            else:
+                st.error("❌ Kết nối thất bại. Thử lại nhé!")
+                st.query_params.clear()
 
     st.title(f"👋 Xin chào, {user['full_name']}!")
     st.caption(f"Gói hiện tại: **{user['plan'].upper()}**")
@@ -158,7 +149,6 @@ elif st.session_state.page == "dashboard":
 
     st.divider()
 
-    # Kiểm tra token Threads đã có chưa
     existing = supabase.table("platforms").select("*").eq("user_id", user["id"]).eq("platform", "threads").execute()
     threads_connected = len(existing.data) > 0
 
@@ -171,8 +161,7 @@ elif st.session_state.page == "dashboard":
         st.warning("⚠️ Bạn chưa kết nối Threads.")
         st.markdown("### 🔗 Kết nối Threads")
         st.markdown("Nhấn nút bên dưới — bạn sẽ được chuyển sang trang Meta để đăng nhập và xác nhận quyền. Chỉ mất 30 giây!")
-        
-        oauth_url = get_threads_oauth_url() + f"&state=threads|{user['id']}"
+        oauth_url = get_threads_oauth_url(user["id"])
         st.link_button("🚀 Kết nối Threads ngay", oauth_url, use_container_width=True)
 
     st.divider()
