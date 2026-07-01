@@ -1,4 +1,5 @@
 import streamlit as st
+import os
 from auth import register_user, login_user, get_all_users_for_admin, approve_user, reject_user
 from supabase_client import supabase
 
@@ -84,10 +85,69 @@ elif st.session_state.page == "admin":
                 st.rerun()
 
 # ═══════════════════════════════════════════════════════════
+# OAUTH THREADS CALLBACK
+# ═══════════════════════════════════════════════════════════
+import requests
+
+THREADS_APP_ID = os.getenv("THREADS_APP_ID")
+THREADS_APP_SECRET = os.getenv("THREADS_APP_SECRET")
+THREADS_REDIRECT_URI = os.getenv("THREADS_REDIRECT_URI")
+
+def get_threads_oauth_url():
+    return (
+        f"https://threads.net/oauth/authorize"
+        f"?client_id={THREADS_APP_ID}"
+        f"&redirect_uri={THREADS_REDIRECT_URI}"
+        f"&scope=threads_basic,threads_content_publish"
+        f"&response_type=code"
+    )
+
+def exchange_code_for_token(code: str) -> str | None:
+    response = requests.post(
+        "https://graph.threads.net/oauth/access_token",
+        data={
+            "client_id": THREADS_APP_ID,
+            "client_secret": THREADS_APP_SECRET,
+            "redirect_uri": THREADS_REDIRECT_URI,
+            "code": code,
+            "grant_type": "authorization_code",
+        }
+    )
+    data = response.json()
+    return data.get("access_token")
+
+# ═══════════════════════════════════════════════════════════
 # TRANG DASHBOARD USER
 # ═══════════════════════════════════════════════════════════
 elif st.session_state.page == "dashboard":
     user = st.session_state.user
+
+    # Xử lý OAuth callback — khi Meta redirect về với ?code=...
+    query_params = st.query_params
+    if "code" in query_params and "platform" in query_params:
+        code = query_params["code"]
+        platform = query_params["platform"]
+        
+        if platform == "threads":
+            with st.spinner("Đang kết nối Threads..."):
+                token = exchange_code_for_token(code)
+                if token:
+                    # Xóa token cũ nếu có
+                    supabase.table("platforms").delete().eq("user_id", user["id"]).eq("platform", "threads").execute()
+                    # Lưu token mới
+                    supabase.table("platforms").insert({
+                        "user_id": user["id"],
+                        "platform": "threads",
+                        "access_token": token,
+                        "is_active": True
+                    }).execute()
+                    st.success("🎉 Kết nối Threads thành công!")
+                    # Xóa query params
+                    st.query_params.clear()
+                    st.rerun()
+                else:
+                    st.error("❌ Kết nối thất bại. Thử lại nhé!")
+                    st.query_params.clear()
 
     st.title(f"👋 Xin chào, {user['full_name']}!")
     st.caption(f"Gói hiện tại: **{user['plan'].upper()}**")
@@ -98,74 +158,22 @@ elif st.session_state.page == "dashboard":
 
     st.divider()
 
-    # ── Kiểm tra token Threads đã có chưa ──
+    # Kiểm tra token Threads đã có chưa
     existing = supabase.table("platforms").select("*").eq("user_id", user["id"]).eq("platform", "threads").execute()
     threads_connected = len(existing.data) > 0
 
     if threads_connected:
         st.success("✅ Threads đã kết nối thành công!")
-        if st.button("🔄 Cập nhật token mới"):
+        if st.button("🔄 Kết nối lại token mới"):
             supabase.table("platforms").delete().eq("user_id", user["id"]).eq("platform", "threads").execute()
             st.rerun()
     else:
-        st.warning("⚠️ Bạn chưa kết nối Threads. Làm theo hướng dẫn bên dưới.")
-
-        with st.expander("📋 Hướng dẫn lấy Threads Token — Bấm để xem", expanded=True):
-            st.markdown("""
-### Bước 1 — Vào trang Graph API Explorer
-👉 Truy cập: https://developers.facebook.com/tools/explorer/
-
----
-
-### Bước 2 — Chọn đúng ứng dụng
-- Nhìn góc trên bên phải, phần **"Meta App"**
-- Chọn app **AFFShopee** trong danh sách
-
----
-
-### Bước 3 — Chọn tài khoản Threads
-- Phần **"User or Page"** → chọn tài khoản Threads của bạn
-- Nếu không thấy tài khoản, nhờ admin thêm bạn vào danh sách thử nghiệm
-
----
-
-### Bước 4 — Thêm quyền cần thiết
-Nhấn **"Add a Permission"** và thêm lần lượt:
-- ✅ `threads_basic`
-- ✅ `threads_content_publish`
-
----
-
-### Bước 5 — Lấy Access Token
-- Nhấn nút **"Generate Access Token"** (màu xanh)
-- Facebook sẽ hỏi xác nhận quyền → nhấn **"Đồng ý"**
-- Copy toàn bộ chuỗi token xuất hiện (rất dài, khoảng 200 ký tự)
-
----
-
-### Bước 6 — Dán token vào ô bên dưới ⬇️
-""")
-
-        st.subheader("🔗 Kết nối Threads")
-        token_input = st.text_area(
-            "Dán Threads Access Token vào đây:",
-            height=120,
-            placeholder="EAAxxxxxxxxx..."
-        )
-
-        if st.button("✅ Lưu và kết nối Threads", use_container_width=True):
-            if not token_input.strip():
-                st.error("❌ Bạn chưa điền token!")
-            else:
-                # Lưu token vào Supabase
-                supabase.table("platforms").insert({
-                    "user_id": user["id"],
-                    "platform": "threads",
-                    "access_token": token_input.strip(),
-                    "is_active": True
-                }).execute()
-                st.success("🎉 Kết nối Threads thành công!")
-                st.rerun()
+        st.warning("⚠️ Bạn chưa kết nối Threads.")
+        st.markdown("### 🔗 Kết nối Threads")
+        st.markdown("Nhấn nút bên dưới — bạn sẽ được chuyển sang trang Meta để đăng nhập và xác nhận quyền. Chỉ mất 30 giây!")
+        
+        oauth_url = get_threads_oauth_url() + f"&state=threads|{user['id']}"
+        st.link_button("🚀 Kết nối Threads ngay", oauth_url, use_container_width=True)
 
     st.divider()
     st.info("🚧 Kết nối Instagram và Facebook sẽ có trong bản cập nhật tiếp theo!")
