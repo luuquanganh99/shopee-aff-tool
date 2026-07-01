@@ -1,29 +1,28 @@
-name: Shopee Affiliate Auto Post
+name: Auto Post Affiliate
 
 on:
   schedule:
-    - cron: '0 1 * * *'
-    - cron: '0 9 * * *'
-    - cron: '0 13 * * *'
-  workflow_dispatch:
+    - cron: '0 * * * *'  # Chạy mỗi đầu giờ
+  workflow_dispatch:      # Cho phép chạy thủ công
 
 jobs:
   post:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install pandas requests python-dotenv openpyxl
+        run: pip install supabase python-dotenv requests pytz
 
-      - name: Create env file
-        run: echo "THREADS_TOKEN=${{ secrets.THREADS_TOKEN }}" > .env
-
-      - name: Run tool
-        run: python main.py
+      - name: Run poster
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python poster.py
