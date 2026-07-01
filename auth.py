@@ -73,7 +73,7 @@ def register_user(email: str, password: str, full_name: str) -> dict:
     else:
         return {"success": True, "message": "Đăng ký thành công! Nhưng gửi email thất bại — liên hệ admin.", "need_otp": False, "email": email}
 
-def verify_otp(email: str, code: str) -> dict:
+def verify_otp(email: str, code: str):
     result = supabase.table("otp_codes").select("*").eq("email", email).eq("code", code).eq("is_used", False).execute()
 
     if not result.data:
