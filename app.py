@@ -102,7 +102,7 @@ def get_threads_oauth_url():
         f"&response_type=code"
     )
 
-def exchange_code_for_token(code: str) -> str | None:
+def exchange_code_for_token(code: str):
     response = requests.post(
         "https://graph.threads.net/oauth/access_token",
         data={
