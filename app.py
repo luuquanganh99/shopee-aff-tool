@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 import requests
-from auth import register_user, login_user, get_all_users_for_admin, approve_user, reject_user
+from auth import register_user, login_user, verify_otp, get_all_users_for_admin, approve_user, reject_user
 from supabase_client import supabase
 
 st.set_page_config(page_title="AffBot", page_icon="🤖", layout="centered")
@@ -67,18 +67,45 @@ if st.session_state.user is None:
 
     with tab2:
         st.subheader("Đăng ký tài khoản")
-        full_name = st.text_input("Họ tên", key="reg_name")
-        email_reg = st.text_input("Email", key="reg_email")
-        password_reg = st.text_input("Mật khẩu", type="password", key="reg_pass")
-        if st.button("Đăng ký", use_container_width=True):
-            if not full_name or not email_reg or not password_reg:
-                st.warning("Vui lòng điền đầy đủ thông tin.")
-            else:
-                result = register_user(email_reg, password_reg, full_name)
-                if result["success"]:
-                    st.success(result["message"])
+
+        if "otp_email" not in st.session_state:
+            st.session_state.otp_email = None
+
+        if st.session_state.otp_email:
+            # Màn hình nhập OTP
+            st.success(f"📧 Mã xác thực đã gửi đến **{st.session_state.otp_email}**")
+            st.markdown("Kiểm tra hộp thư (kể cả thư mục Spam) và nhập mã 6 số bên dưới:")
+            otp_input = st.text_input("Mã xác thực 6 số:", max_chars=6, key="otp_input")
+            if st.button("✅ Xác thực", use_container_width=True):
+                if len(otp_input) != 6:
+                    st.error("Vui lòng nhập đủ 6 số.")
                 else:
-                    st.error(result["message"])
+                    result = verify_otp(st.session_state.otp_email, otp_input)
+                    if result["success"]:
+                        st.success("🎉 Xác thực thành công! Bạn có thể đăng nhập ngay.")
+                        st.session_state.otp_email = None
+                    else:
+                        st.error(result["message"])
+            if st.button("Đăng ký lại với email khác"):
+                st.session_state.otp_email = None
+                st.rerun()
+        else:
+            # Form đăng ký
+            full_name = st.text_input("Họ tên", key="reg_name")
+            email_reg = st.text_input("Email", key="reg_email")
+            password_reg = st.text_input("Mật khẩu", type="password", key="reg_pass")
+            if st.button("Đăng ký", use_container_width=True):
+                if not full_name or not email_reg or not password_reg:
+                    st.warning("Vui lòng điền đầy đủ thông tin.")
+                else:
+                    result = register_user(email_reg, password_reg, full_name)
+                    if result["success"]:
+                        st.success(result["message"])
+                        if result.get("need_otp"):
+                            st.session_state.otp_email = result["email"]
+                            st.rerun()
+                    else:
+                        st.error(result["message"])
 
 # ═══════════════════════════════════════════════════════════
 # TRANG ADMIN
