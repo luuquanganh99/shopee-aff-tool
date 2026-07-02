@@ -10,6 +10,43 @@ st.set_page_config(page_title="AffBot", page_icon="🤖", layout="centered")
 THREADS_APP_ID = os.getenv("THREADS_APP_ID")
 THREADS_APP_SECRET = os.getenv("THREADS_APP_SECRET")
 THREADS_REDIRECT_URI = os.getenv("THREADS_REDIRECT_URI")
+FB_APP_ID = os.getenv("FB_APP_ID")
+FB_APP_SECRET = os.getenv("FB_APP_SECRET")
+FB_REDIRECT_URI = os.getenv("FB_REDIRECT_URI")
+
+def get_facebook_oauth_url(user_id):
+    return (
+        f"https://www.facebook.com/v18.0/dialog/oauth"
+        f"?client_id={FB_APP_ID}"
+        f"&redirect_uri={FB_REDIRECT_URI}"
+        f"&scope=pages_manage_posts,pages_read_engagement,instagram_basic,instagram_content_publish"
+        f"&response_type=code"
+        f"&state=facebook|{user_id}"
+    )
+
+def exchange_fb_code_for_token(code):
+    import urllib.parse
+    response = requests.get(
+        "https://graph.facebook.com/v18.0/oauth/access_token",
+        params={
+            "client_id": FB_APP_ID,
+            "client_secret": FB_APP_SECRET,
+            "redirect_uri": FB_REDIRECT_URI,
+            "code": code,
+        }
+    )
+    data = response.json()
+    return data.get("access_token")
+
+def get_pages_and_ig(access_token):
+    response = requests.get(
+        "https://graph.facebook.com/v18.0/me/accounts",
+        params={
+            "fields": "id,name,access_token,instagram_business_account",
+            "access_token": access_token
+        }
+    )
+    return response.json().get("data", [])
 
 def get_threads_oauth_url(user_id):
     return (
@@ -148,24 +185,64 @@ elif st.session_state.page == "dashboard":
 
     # Xử lý OAuth callback
     query_params = st.query_params
-    if "code" in query_params:
+    query_params = st.query_params
+    if "code" in query_params and "state" in query_params:
         code = query_params["code"]
-        with st.spinner("Đang kết nối Threads..."):
-            token = exchange_code_for_token(code)
-            if token:
-                supabase.table("platforms").delete().eq("user_id", user["id"]).eq("platform", "threads").execute()
-                supabase.table("platforms").insert({
-                    "user_id": user["id"],
-                    "platform": "threads",
-                    "access_token": token,
-                    "is_active": True
-                }).execute()
-                st.query_params.clear()
-                st.success("🎉 Kết nối Threads thành công!")
-                st.rerun()
-            else:
-                st.error("❌ Kết nối thất bại. Thử lại nhé!")
-                st.query_params.clear()
+        state = query_params["state"]
+        platform = state.split("|")[0] if "|" in state else ""
+
+        if platform == "threads":
+            with st.spinner("Đang kết nối Threads..."):
+                token = exchange_code_for_token(code)
+                if token:
+                    supabase.table("platforms").delete().eq("user_id", user["id"]).eq("platform", "threads").execute()
+                    supabase.table("platforms").insert({
+                        "user_id": user["id"],
+                        "platform": "threads",
+                        "access_token": token,
+                        "is_active": True
+                    }).execute()
+                    st.query_params.clear()
+                    st.success("🎉 Kết nối Threads thành công!")
+                    st.rerun()
+                else:
+                    st.error("❌ Kết nối thất bại. Thử lại nhé!")
+                    st.query_params.clear()
+
+        elif platform == "facebook":
+            with st.spinner("Đang kết nối Facebook & Instagram..."):
+                token = exchange_fb_code_for_token(code)
+                if token:
+                    pages = get_pages_and_ig(token)
+                    saved = 0
+                    for page in pages:
+                        # Lưu Facebook Fanpage token
+                        supabase.table("platforms").delete().eq("user_id", user["id"]).eq("platform", "facebook").eq("page_id", page["id"]).execute()
+                        supabase.table("platforms").insert({
+                            "user_id": user["id"],
+                            "platform": "facebook",
+                            "access_token": page["access_token"],
+                            "page_id": page["id"],
+                            "is_active": True
+                        }).execute()
+                        saved += 1
+                        # Lưu Instagram nếu có
+                        ig = page.get("instagram_business_account")
+                        if ig:
+                            supabase.table("platforms").delete().eq("user_id", user["id"]).eq("platform", "instagram").execute()
+                            supabase.table("platforms").insert({
+                                "user_id": user["id"],
+                                "platform": "instagram",
+                                "access_token": page["access_token"],
+                                "page_id": ig["id"],
+                                "is_active": True
+                            }).execute()
+                    st.query_params.clear()
+                    st.success(f"🎉 Đã kết nối {saved} Facebook Fanpage và Instagram!")
+                    st.rerun()
+                else:
+                    st.error("❌ Kết nối thất bại. Thử lại nhé!")
+                    st.query_params.clear()
 
     st.title(f"👋 Xin chào, {user['full_name']}!")
     st.caption(f"Gói hiện tại: **{user['plan'].upper()}**")
