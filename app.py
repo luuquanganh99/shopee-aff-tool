@@ -61,6 +61,7 @@ def exchange_fb_code_for_token(code):
         }
     )
     data = response.json()
+    print("FB TOKEN RESPONSE:", data)  # debug
     return data.get("access_token")
 
 def get_pages_and_ig(access_token):
