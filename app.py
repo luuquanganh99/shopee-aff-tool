@@ -381,4 +381,29 @@ elif st.session_state.page == "dashboard":
         st.warning("⚠️ Kết nối Threads trước để chọn khung giờ đăng.")
 
     st.divider()
-    st.info("🚧 Kết nối Instagram và Facebook sẽ có trong bản cập nhật tiếp theo!")
+    st.divider()
+
+    # ─── Kết nối Facebook & Instagram ───────────────────
+    st.subheader("📘 Facebook Fanpage & Instagram")
+
+    fb_existing = supabase.table("platforms").select("*").eq("user_id", user["id"]).eq("platform", "facebook").execute()
+    ig_existing = supabase.table("platforms").select("*").eq("user_id", user["id"]).eq("platform", "instagram").execute()
+
+    fb_connected = len(fb_existing.data) > 0
+    ig_connected = len(ig_existing.data) > 0
+
+    if fb_connected:
+        st.success(f"✅ Đã kết nối {len(fb_existing.data)} Facebook Fanpage!")
+        if ig_connected:
+            st.success("✅ Instagram đã kết nối thành công!")
+        else:
+            st.warning("⚠️ Chưa tìm thấy Instagram liên kết — đảm bảo Instagram đã liên kết với Fanpage.")
+        if st.button("🔄 Kết nối lại Facebook & Instagram"):
+            supabase.table("platforms").delete().eq("user_id", user["id"]).eq("platform", "facebook").execute()
+            supabase.table("platforms").delete().eq("user_id", user["id"]).eq("platform", "instagram").execute()
+            st.rerun()
+    else:
+        st.warning("⚠️ Chưa kết nối Facebook & Instagram.")
+        st.markdown("Nhấn nút bên dưới — đăng nhập Facebook và chọn Fanpage muốn kết nối. Chỉ mất 30 giây!")
+        fb_oauth_url = get_facebook_oauth_url(user["id"])
+        st.link_button("📘 Kết nối Facebook & Instagram ngay", fb_oauth_url, use_container_width=True)
