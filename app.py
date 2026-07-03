@@ -86,7 +86,7 @@ def logout():
     st.session_state.user = None
     st.session_state.page = "login"
 
-# ─── Xử lý OAuth callback sớm ────────────────────────────
+# ─── Xử lý OAuth callback sớm (khôi phục phiên đăng nhập) ─
 query_params = st.query_params
 if "code" in query_params and "state" in query_params:
     state = query_params["state"]
@@ -119,10 +119,9 @@ if "code" in query_params and "state" in query_params:
                                 "page_id": ig["id"],
                                 "is_active": True
                             }).execute()
-                    st.success("🎉 Kết nối Facebook & Instagram thành công!")
+                    st.session_state.oauth_message = ("success", "🎉 Kết nối Facebook & Instagram thành công!")
                 else:
-                    st.error("❌ Kết nối thất bại. Thử lại nhé!")
-            st.query_params.clear()
+                    st.session_state.oauth_message = ("error", "❌ Kết nối Facebook thất bại. Thử lại nhé!")
 
         elif platform == "threads":
             with st.spinner("Đang kết nối Threads..."):
@@ -135,10 +134,27 @@ if "code" in query_params and "state" in query_params:
                         "access_token": token,
                         "is_active": True
                     }).execute()
-                    st.success("🎉 Kết nối Threads thành công!")
+                    st.session_state.oauth_message = ("success", "🎉 Kết nối Threads thành công!")
                 else:
-                    st.error("❌ Kết nối thất bại. Thử lại nhé!")
-            st.query_params.clear()
+                    st.session_state.oauth_message = ("error", "❌ Kết nối Threads thất bại. Thử lại nhé!")
+
+        # ─── Khôi phục phiên đăng nhập sau khi OAuth xong ──
+        user_result = supabase.table("users").select("*").eq("id", user_id).execute()
+        if user_result.data:
+            st.session_state.user = user_result.data[0]
+            st.session_state.page = "admin" if user_result.data[0]["is_admin"] else "dashboard"
+
+    st.query_params.clear()
+    st.rerun()
+
+# ─── Hiển thị thông báo kết quả OAuth (nếu có) ────────────
+if "oauth_message" in st.session_state:
+    msg_type, msg_text = st.session_state.oauth_message
+    if msg_type == "success":
+        st.success(msg_text)
+    else:
+        st.error(msg_text)
+    del st.session_state.oauth_message
 
 # ═══════════════════════════════════════════════════════════
 # TRANG LOGIN / REGISTER
