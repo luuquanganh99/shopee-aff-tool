@@ -45,7 +45,7 @@ def get_facebook_oauth_url(user_id):
         f"https://www.facebook.com/v18.0/dialog/oauth"
         f"?client_id={FB_APP_ID}"
         f"&redirect_uri={FB_REDIRECT_URI}"
-        f"&scope=pages_manage_posts,pages_read_engagement,instagram_basic,instagram_content_publish"
+        f"&scope=pages_show_list,pages_manage_posts,pages_read_engagement,instagram_basic,instagram_content_publish"
         f"&response_type=code"
         f"&state=facebook|{user_id}"
     )
@@ -72,7 +72,9 @@ def get_pages_and_ig(access_token):
             "access_token": access_token
         }
     )
-    return response.json().get("data", [])
+    data = response.json()
+    print("FB PAGES RESPONSE:", data)  # debug
+    return data.get("data", [])
 
 # ─── Session State ────────────────────────────────────────
 if "user" not in st.session_state:
@@ -98,30 +100,40 @@ if "code" in query_params and "state" in query_params:
         if platform == "facebook":
             with st.spinner("Đang kết nối Facebook & Instagram..."):
                 token = exchange_fb_code_for_token(code)
-                if token:
+                if not token:
+                    st.session_state.oauth_message = ("error", "❌ Không lấy được token từ Facebook. Thử lại nhé!")
+                else:
                     pages = get_pages_and_ig(token)
-                    for page in pages:
-                        supabase.table("platforms").delete().eq("user_id", user_id).eq("platform", "facebook").eq("page_id", page["id"]).execute()
-                        supabase.table("platforms").insert({
-                            "user_id": user_id,
-                            "platform": "facebook",
-                            "access_token": page["access_token"],
-                            "page_id": page["id"],
-                            "is_active": True
-                        }).execute()
-                        ig = page.get("instagram_business_account")
-                        if ig:
-                            supabase.table("platforms").delete().eq("user_id", user_id).eq("platform", "instagram").execute()
+                    if not pages:
+                        st.session_state.oauth_message = ("error", "❌ Không tìm thấy Fanpage nào. Khi Facebook hỏi 'Chọn trang', hãy chọn Fanpage bạn muốn kết nối rồi thử lại.")
+                    else:
+                        saved_pages = 0
+                        saved_ig = 0
+                        for page in pages:
+                            supabase.table("platforms").delete().eq("user_id", user_id).eq("platform", "facebook").eq("page_id", page["id"]).execute()
                             supabase.table("platforms").insert({
                                 "user_id": user_id,
-                                "platform": "instagram",
+                                "platform": "facebook",
                                 "access_token": page["access_token"],
-                                "page_id": ig["id"],
+                                "page_id": page["id"],
                                 "is_active": True
                             }).execute()
-                    st.session_state.oauth_message = ("success", "🎉 Kết nối Facebook & Instagram thành công!")
-                else:
-                    st.session_state.oauth_message = ("error", "❌ Kết nối Facebook thất bại. Thử lại nhé!")
+                            saved_pages += 1
+                            ig = page.get("instagram_business_account")
+                            if ig:
+                                supabase.table("platforms").delete().eq("user_id", user_id).eq("platform", "instagram").execute()
+                                supabase.table("platforms").insert({
+                                    "user_id": user_id,
+                                    "platform": "instagram",
+                                    "access_token": page["access_token"],
+                                    "page_id": ig["id"],
+                                    "is_active": True
+                                }).execute()
+                                saved_ig += 1
+                        if saved_ig > 0:
+                            st.session_state.oauth_message = ("success", f"🎉 Đã kết nối {saved_pages} Fanpage và Instagram!")
+                        else:
+                            st.session_state.oauth_message = ("success", f"✅ Đã kết nối {saved_pages} Fanpage. Instagram chưa liên kết với Fanpage nào — kiểm tra lại trong Instagram Business.")
 
         elif platform == "threads":
             with st.spinner("Đang kết nối Threads..."):
